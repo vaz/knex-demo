@@ -1,54 +1,83 @@
 # knex
 
-- is a query builder
-- is higher-level than a package like `pg`
-- can use many backends (`pg` is one, there are backends
-  for MySQL, MSSQL and many others as well)
+Homepage and documentation: http://knexjs.org/
+
+`knex` is a Node package that provides:
+
+- a nicer way to build and execute SQL queries
+- support for talking to many different SQL database engines (PostgreSQL, MySQL, MSSSQL, ...)
+- database migrations - transitioning schema from one version to another
+
+Also:
+
+- it only works for SQL (relational) databases (not Mongo, etc)
+- it wraps low-level client libraries like `pg` to talk to database servers, but you can use it without a client library too
 - comes with a CLI command `knex` (for managing migrations)
 
-## Plain query builder, no backend
+To install it for a project:
 
-When you `require('knex')`, what you get back is a function
-used to configure knex for the current app. The docs usually show a specific incantation where this function is called immediately as it's required, instead of assigning it to a variable. For example:
+```terminal
+npm install knex --save
+```
+
+## requiring knex
+
+[In the docs](http://knexjs.org/#Installation-client) you'll see knex being required in a form like this:
+
+```javascript
+const knex = require('knex')({ /* configuration */ });
+```
+
+That is, when you `require('knex')`, it doesn't really give you the `knex` object you want to work with, it gives you a function used to build the `knex` object you want. That function takes a configuration (object) as an argument. It's nothing magical, just a shortcut for something like:
+
+```javascript
+const config = { /* configuration here */ };
+const makeKnex = require('knex');
+const knex = makeKnex(config);
+```
+
+## Plain query builder (no client)
+
+Reference: http://knexjs.org/#Builder
+
+An empty configuration means there's no client library, thus no database server to talk to.
 
 ```javascript
 const knex = require('knex')({})
 ```
 
-This gives us a `knex` object with no backend (because the configuration is `{}`, an empty object).
+This can be useful if you just want to play with the SQL query builder and see how it works.
 
-"No backend" means we can use the query building methods of knex, but we don't have a database to execute it against.
-
-One thing this is useful for is for experimenting with the
-syntax in interactive node:
+In interactive Node:
 
 ```node
 > const knex = require('knex')({})
 undefined
-
-> knex.select().from("users")
-Builder { ...snip... }
-
-> knex.select().from("users").toString()
-'select "name", "age" from "users"'
+> knex.select()
+Builder { ...<some output omitted>... }
+> knex.select().toString()
+'select *'
+> knex.select().from('users')
+Builder { ...<some output omitted>... }
+> knex.select().from('users').toString()
+'select * from "users"'
+> knex.select().from('users').limit(1).toString()
+'select * from "users" limit 1'
+> knex.select().from('users').where('age', '>=', 19).limit(1).toString()
+'select * from "users" where "age" > 18 limit 1'
+> knex.select().from('users').where({ gender: 'm' }).where('age', '>=', 19).limit(1).toString()
+'select * from "users" where "gender" = \'m\' and "age" >= 19 limit 1'
 ```
 
 As we see here, the query building methods return a `Builder` object. You can keep chaining query building methods to continue building the same query. You can call `toString()` on a `Builder` (meaning at any point along the chain) to see the SQL it would produce.
 
-(Note: depending on the backend, some SQL may change slightly, since not every backend implements SQL exactly the same)
+(Note: depending on the configured client, some SQL may change slightly, since not every database engine implements SQL exactly the same way.)
 
 (Note 2: `knex.select()` is the same as `knex.select("*")`)
 
-"Chain?" What does it mean?
+When you chain methods like this, each method call modifies the query you're building, adding more clauses or modifying existing clauses.
 
-```node
-> knex.select('name', 'age').from('users').where('age', '>', 18).toString()
-'select "name", "age" from "users" where "age" > 18'
-```
-
-It composes in a similar order to actual SQL.
-
-Notice the `where(...)`. There are several ways to specify where-clauses:
+There are several ways to specify where-clauses:
 
 - `.where('name', 'joe')` produces `WHERE "name" = "joe"`
 - `.where('age', 20)` produces `WHERE "age" = 20`
@@ -56,10 +85,11 @@ Notice the `where(...)`. There are several ways to specify where-clauses:
 - `.where({ age: 20 })` is the same as `.where('age', 20)`
 - `.where({ age: 20, dollars: 4 }` produces `WHERE "age" = 20 and "dollars" = 4`
 
-See the docs for more, and variations on `.where` like `.whereNot`.
-
+See the docs for more examples, and variations on `.where` like `.whereNot`. Also see `.join`, `.having` and others that specify conditions the same way.
 
 ## schema methods
+
+Reference: http://knexjs.org/#Schema
 
 Examples:
 
@@ -82,12 +112,29 @@ knex.schema.table('cats', function (table) {
 })
 ```
 
-Etc...
+Drop table:
 
-See the rest under "Schema Builder" section of the docs.
+```javascript
+knex.schema.dropTable('cats');
+```
+
+See more in the docs.
 
 
-## Actual configuration (example)
+## knex configuration: client
+
+Quick review first:
+
+- most database engines follow a client/server model
+- various kinds of clients can connect to the database server, including command-line clients (like `psql`), GUI clients, or any app using a client library
+- the `pg` package you've been using to interact with PostgreSQL is a client library. It's fairly low-level, meaning more emphasis is on client correctness and completeness than on usability (as you may have noticed...).
+
+Knex can be configured with a "client", meaning a client library. With a client and valid connection settings, knex is able to actually execute queries.
+
+Knex can use the `pg` client library (that you were just using) as its "client", as well as many other client libraries supporting MySQL, MSSQL, etc.
+An example configuration using `pg` is provided further down.
+
+Here's an example configuration, used in this demo project:
 
 ```javascript
 const knex = require('knex')({
@@ -101,7 +148,12 @@ const knex = require('knex')({
 });
 ```
 
+Note, you don't actually `require("pg")`. But you still have to `npm install pg --save`! Knex is going to require it somewhere in its own code.
+
+
 ## Interfaces (aka actually executing queries)
+
+Reference: http://knexjs.org/#Interfaces
 
 Once you have a configuration with a real backend,
 you'll want to execute queries, not just build them.
@@ -129,7 +181,9 @@ As usual, for async we can use callbacks. However, you'll see
 a different syntax, Promise-based syntax, in most of knex
 documentation.
 
-Here's how the two look side by side:
+Here's how the two look side by side.
+
+Callbacks:
 
 ```javascript
 knex.select().from('artists').asCallback(function (err, result) {
@@ -146,6 +200,8 @@ knex.select().from('artists').asCallback(function (err, result) {
   });
 });
 ```
+
+Promises:
 
 ```javascript
 knex.select().from('artists').then(function (result) {
@@ -176,6 +232,8 @@ widely accepted but jQuery doesn't support calling it `catch`.
 
 
 ## Migrations
+
+Reference: http://knexjs.org/#Migrations
 
 - A migration is a description of changes made to a database,
   to take it from one state (or *version*) to another.
@@ -239,7 +297,7 @@ config.
 
 Set it up for pg. Here's mine:
 
-```terminal
+```javascript
 module.exports = {
 
   development: {
